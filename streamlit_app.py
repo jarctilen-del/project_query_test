@@ -612,19 +612,6 @@ def main():
         .stButton > button:hover {
             background-color: #45a049;
         }
-        .report-box {
-            background-color: #f0f2f6;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 10px 0;
-        }
-        .success-box {
-            background-color: #d4edda;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-            border-left: 4px solid #28a745;
-        }
     </style>
     """, unsafe_allow_html=True)
     
@@ -636,6 +623,8 @@ def main():
             st.session_state.search_results = None
             st.session_state.selected_partner = None
             st.session_state.generated_report = None
+            st.session_state.current_search_term = ""
+            st.session_state.current_search_type = ""
     
     # Sidebar
     with st.sidebar:
@@ -645,10 +634,11 @@ def main():
         output_folder = st.text_input(
             "Output Folder",
             value="results",
+            key="output_folder_input",
             help="Folder where reports will be saved"
         )
         
-        if st.button("📁 Update Output Folder"):
+        if st.button("📁 Update Output Folder", key="update_output_folder"):
             st.session_state.query_system.results_folder = output_folder
             st.session_state.report_saver.set_output_folder(output_folder)
             st.success(f"Output folder updated to: {output_folder}")
@@ -656,7 +646,7 @@ def main():
         st.divider()
         
         # Session folder
-        if st.button("📂 Create New Session Folder"):
+        if st.button("📂 Create New Session Folder", key="create_session"):
             folder = st.session_state.report_saver.create_session_folder()
             st.success(f"Session folder created: {folder}")
         
@@ -689,13 +679,15 @@ def main():
         
         with col1:
             st.subheader("Search by Partner Name")
-            partner_name = st.text_input("Enter partner name:", key="name_search")
+            partner_name = st.text_input("Enter partner name:", key="name_search_input")
             
-            if st.button("🔍 Search by Name", key="btn_name"):
+            if st.button("🔍 Search by Name", key="search_by_name_btn"):
                 if partner_name:
                     with st.spinner("Searching..."):
                         results = st.session_state.query_system.search_partners(partner_name)
                         st.session_state.search_results = results
+                        st.session_state.current_search_term = partner_name
+                        st.session_state.current_search_type = "name"
                         
                         if results:
                             st.success(f"Found {len(results)} partners")
@@ -704,13 +696,15 @@ def main():
         
         with col2:
             st.subheader("Search by Country")
-            country_code = st.text_input("Enter country code (e.g., DE, FR, IT):", key="country_search", max_chars=2)
+            country_code = st.text_input("Enter country code (e.g., DE, FR, IT):", key="country_search_input", max_chars=2)
             
-            if st.button("🔍 Search by Country", key="btn_country"):
+            if st.button("🔍 Search by Country", key="search_by_country_btn"):
                 if country_code and len(country_code) == 2:
                     with st.spinner("Searching..."):
                         results = st.session_state.query_system.search_partners(country_code.upper(), search_by_country=True)
                         st.session_state.search_results = results
+                        st.session_state.current_search_term = country_code.upper()
+                        st.session_state.current_search_type = "country"
                         
                         if results:
                             st.success(f"Found {len(results)} partners from {country_code.upper()}")
@@ -740,25 +734,23 @@ def main():
             st.dataframe(df_results, use_container_width=True, height=400)
             
             # Save search results
-            if st.button("💾 Save Search Results"):
-                search_term = partner_name if partner_name else country_code
-                search_type = 'name' if partner_name else 'country'
+            if st.button("💾 Save Search Results", key="save_search_results_btn"):
                 filepath = st.session_state.report_saver.save_search_results(
                     st.session_state.search_results, 
-                    search_term,
-                    search_type
+                    st.session_state.current_search_term,
+                    st.session_state.current_search_type
                 )
                 st.success(f"Search results saved to: {filepath}")
             
             # Select partner for detailed view
             st.subheader("Select Partner for Detailed Analysis")
             partner_names = [p.legal_name for p in st.session_state.search_results[:100]]
-            selected_name = st.selectbox("Choose a partner:", partner_names)
+            selected_name = st.selectbox("Choose a partner:", partner_names, key="partner_select")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("📄 View Details"):
+                if st.button("📄 View Details", key="view_details_btn"):
                     with st.spinner("Loading details..."):
                         details = st.session_state.query_system.get_partner_details(selected_name)
                         if details:
@@ -768,14 +760,14 @@ def main():
                             st.error("Could not load partner details")
             
             with col2:
-                if st.button("📝 Generate Report"):
+                if st.button("📝 Generate Report", key="generate_report_btn_tab1"):
                     with st.spinner("Generating report..."):
                         report = st.session_state.query_system.generate_collaboration_report(selected_name)
                         st.session_state.generated_report = report
                         st.success("Report generated!")
             
             with col3:
-                if st.button("💾 Save to File"):
+                if st.button("💾 Save to File", key="save_report_btn_tab1"):
                     with st.spinner("Saving..."):
                         filepath = st.session_state.query_system.export_collaboration_report_to_txt(selected_name)
                         if filepath:
@@ -789,14 +781,15 @@ def main():
             # Display generated report
             if st.session_state.generated_report:
                 with st.expander("📄 Generated Report", expanded=True):
-                    st.text_area("Report Content", st.session_state.generated_report, height=400)
+                    st.text_area("Report Content", st.session_state.generated_report, height=400, key="report_content_tab1")
                     
                     # Download button
                     st.download_button(
                         label="📥 Download Report as TXT",
                         data=st.session_state.generated_report,
                         file_name=f"{selected_name}_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                        mime="text/plain"
+                        mime="text/plain",
+                        key="download_report_btn_tab1"
                     )
             
             # Display partner details
@@ -836,12 +829,12 @@ def main():
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            partner_name = st.text_input("Enter exact legal name:", key="report_name")
+            partner_name = st.text_input("Enter exact legal name:", key="report_name_input")
         
         with col2:
             st.write("")
             st.write("")
-            generate_btn = st.button("🚀 Generate Report", key="generate_report_btn")
+            generate_btn = st.button("🚀 Generate Report", key="generate_report_btn_tab2")
         
         if generate_btn and partner_name:
             with st.spinner("Generating report..."):
@@ -853,13 +846,13 @@ def main():
                     st.success("Report generated successfully!")
                     
                     # Display report
-                    st.text_area("Collaboration Report", report, height=500)
+                    st.text_area("Collaboration Report", report, height=500, key="report_content_tab2")
                     
                     # Save options
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        if st.button("💾 Save to File"):
+                        if st.button("💾 Save to File", key="save_report_btn_tab2"):
                             filepath = st.session_state.query_system.export_collaboration_report_to_txt(partner_name)
                             if filepath:
                                 st.success(f"Saved to: {filepath}")
@@ -869,11 +862,12 @@ def main():
                             label="📥 Download",
                             data=report,
                             file_name=f"{partner_name}_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                            mime="text/plain"
+                            mime="text/plain",
+                            key="download_report_btn_tab2"
                         )
                     
                     with col3:
-                        if st.button("💾 Save Details"):
+                        if st.button("💾 Save Details", key="save_details_btn_tab2"):
                             details = st.session_state.query_system.get_partner_details(partner_name)
                             if details:
                                 filepath = st.session_state.report_saver.save_collaboration_details(details, partner_name)
@@ -882,7 +876,7 @@ def main():
     with tab3:
         st.subheader("📊 System Statistics")
         
-        if st.button("🔄 Refresh Statistics"):
+        if st.button("🔄 Refresh Statistics", key="refresh_stats_btn"):
             st.rerun()
         
         if st.session_state.query_system.all_projects_df is not None:
@@ -919,7 +913,7 @@ def main():
             st.info("No data loaded. Please wait for data to load or check your connection.")
         
         # Export statistics
-        if st.button("📊 Export Statistics Report"):
+        if st.button("📊 Export Statistics Report", key="export_stats_btn"):
             stats_report = []
             stats_report.append("=" * 80)
             stats_report.append("SYSTEM STATISTICS REPORT")
@@ -928,9 +922,10 @@ def main():
             stats_report.append("")
             
             if st.session_state.query_system.all_projects_df is not None:
-                stats_report.append(f"Total Projects: {total_projects}")
+                total_projects_local = len(st.session_state.query_system.all_projects_df)
+                stats_report.append(f"Total Projects: {total_projects_local}")
                 stats_report.append(f"Projects with Slovenian Partners: {si_count}")
-                stats_report.append(f"Percentage: {(si_count/total_projects)*100:.1f}%")
+                stats_report.append(f"Percentage: {(si_count/total_projects_local)*100:.1f}%")
             
             stats_text = "\n".join(stats_report)
             
@@ -938,7 +933,8 @@ def main():
                 label="📥 Download Statistics Report",
                 data=stats_text,
                 file_name=f"statistics_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                mime="text/plain"
+                mime="text/plain",
+                key="download_stats_btn"
             )
     
     with tab4:
@@ -972,16 +968,20 @@ def main():
                 st.dataframe(df_files, use_container_width=True)
                 
                 # Open folder button
-                if st.button("📂 Open Output Folder"):
+                if st.button("📂 Open Output Folder", key="open_folder_btn"):
                     import subprocess
                     import platform
                     
-                    if platform.system() == "Windows":
-                        os.startfile(output_folder)
-                    elif platform.system() == "Darwin":
-                        subprocess.run(["open", output_folder])
-                    else:
-                        subprocess.run(["xdg-open", output_folder])
+                    try:
+                        if platform.system() == "Windows":
+                            os.startfile(output_folder)
+                        elif platform.system() == "Darwin":
+                            subprocess.run(["open", output_folder])
+                        else:
+                            subprocess.run(["xdg-open", output_folder])
+                        st.success("Output folder opened in file explorer")
+                    except Exception as e:
+                        st.error(f"Could not open folder: {e}")
             else:
                 st.info("No files saved yet. Generate some reports to see them here.")
         else:
@@ -997,6 +997,6 @@ def main():
     """, unsafe_allow_html=True)
 
 
-# This is the correct way to run the app
+# Run the app
 if __name__ == "__main__":
     main()
