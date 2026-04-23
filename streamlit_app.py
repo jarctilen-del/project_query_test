@@ -29,6 +29,7 @@ class ProjectInfo:
     total_budget: float
     has_slovenian_partners: bool
     slovenian_partners: List[str]
+    partner_funding: float = 0.0  # Funding received by the specific partner in this project
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for display."""
@@ -40,6 +41,7 @@ class ProjectInfo:
             "Start Date": self.start_date,
             "End Date": self.end_date,
             "Total Budget": f"€{self.total_budget:,.0f}",
+            "Partner Funding": f"€{self.partner_funding:,.0f}",
             "Has Slovenian Partners": self.has_slovenian_partners,
             "Slovenian Partners": ", ".join(self.slovenian_partners) if self.slovenian_partners else "None"
         }
@@ -153,7 +155,8 @@ class ReportSaver:
         partner_info = details["partner_info"]
         all_projects = details["all_projects"]
         slovenian_projects = details["slovenian_projects"]
-        non_slovenian_projects = details.get("non_slovenian_projects", [])
+        non_slovenian_projects = details.get("non_slovenian_projects_list", [])
+        total_funding = details.get("total_partner_funding", 0.0)
         
         lines = []
         lines.append("=" * 80)
@@ -174,6 +177,7 @@ class ReportSaver:
         lines.append(f"  Slovenian Collaborations: {details['slovenian_collaborations']}")
         lines.append(f"  Non-Slovenian Projects: {len(non_slovenian_projects)}")
         lines.append(f"  Collaboration Ratio: {partner_info['Collaboration Ratio']}")
+        lines.append(f"  TOTAL EU FUNDING RECEIVED: €{total_funding:,.0f}")
         lines.append("")
         
         # Show ALL projects (both Slovenian and non-Slovenian)
@@ -187,9 +191,10 @@ class ReportSaver:
                 lines.append(f"   Acronym: {project['Acronym']}")
                 lines.append(f"   Project ID: {project['Project ID']}")
                 lines.append(f"   Status: {si_status}")
+                lines.append(f"   Partner Funding: {project.get('Partner Funding', 'N/A')}")
+                lines.append(f"   Total Project Budget: {project['Total Budget']}")
                 lines.append(f"   Website: {project['Website']}")
                 lines.append(f"   Duration: {project['Start Date']} to {project['End Date']}")
-                lines.append(f"   Budget: {project['Total Budget']}")
                 if project['Has Slovenian Partners']:
                     lines.append(f"   Slovenian Partners: {project['Slovenian Partners']}")
         else:
@@ -364,9 +369,11 @@ class ParticipantQuerySystem:
         return result
     
     def _get_project_info(self, project_id: str, legal_name: str = None) -> Optional[ProjectInfo]:
-        """Get complete project information."""
-        if project_id in self.partner_projects_cache:
-            return self.partner_projects_cache[project_id]
+        """Get complete project information including partner's funding."""
+        # Check cache first (key includes legal_name for partner-specific funding)
+        cache_key = f"{project_id}_{legal_name}" if legal_name else project_id
+        if cache_key in self.partner_projects_cache:
+            return self.partner_projects_cache[cache_key]
         
         project_row = self.all_projects_df[self.all_projects_df['project_ID'] == project_id]
         if project_row.empty:
@@ -374,6 +381,24 @@ class ParticipantQuerySystem:
         
         row = project_row.iloc[0]
         has_slovenian, slovenian_partners = self._project_has_slovenian_partners(project_id)
+        
+        # Calculate partner's funding in this project
+        partner_funding = 0.0
+        if legal_name:
+            participants = row['participants']
+            if isinstance(participants, list):
+                for participant in participants:
+                    if participant.get('legalName') == legal_name:
+                        eu_contribution = participant.get('eucontribution', 0)
+                        try:
+                            if isinstance(eu_contribution, str):
+                                eu_contribution = float(eu_contribution.replace(',', ''))
+                            elif not isinstance(eu_contribution, (int, float)):
+                                eu_contribution = 0
+                        except:
+                            eu_contribution = 0
+                        partner_funding = eu_contribution
+                        break
         
         project_info = ProjectInfo(
             project_id=project_id,
@@ -384,10 +409,13 @@ class ParticipantQuerySystem:
             end_date=row['end_date'],
             total_budget=float(row['budget']) if pd.notna(row['budget']) else 0,
             has_slovenian_partners=has_slovenian,
-            slovenian_partners=slovenian_partners
+            slovenian_partners=slovenian_partners,
+            partner_funding=partner_funding
         )
         
-        self.partner_projects_cache[project_id] = project_info
+        # Cache the result
+        self.partner_projects_cache[cache_key] = project_info
+        
         return project_info
     
     def search_partners(self, search_term: str, search_by_country: bool = False) -> List[PartnerInfo]:
@@ -470,7 +498,7 @@ class ParticipantQuerySystem:
         return matched_partners
     
     def get_partner_details(self, legal_name: str) -> Optional[Dict]:
-        """Get detailed information about a specific partner including ALL projects."""
+        """Get detailed information about a specific partner including ALL projects and funding."""
         if self.all_projects_df is None:
             st.error("No data available.")
             return None
@@ -491,15 +519,28 @@ class ParticipantQuerySystem:
         partner_projects = []
         slovenian_projects = []
         non_slovenian_projects = []
+        total_partner_funding = 0.0
         
         for idx, row in self.all_projects_df.iterrows():
             if not isinstance(row['participants'], list):
                 continue
             
             partner_in_project = False
+            partner_funding_in_project = 0.0
             for participant in row['participants']:
                 if participant.get('legalName') == partner_info.legal_name:
                     partner_in_project = True
+                    # Get funding for this partner in this project
+                    eu_contribution = participant.get('eucontribution', 0)
+                    try:
+                        if isinstance(eu_contribution, str):
+                            eu_contribution = float(eu_contribution.replace(',', ''))
+                        elif not isinstance(eu_contribution, (int, float)):
+                            eu_contribution = 0
+                    except:
+                        eu_contribution = 0
+                    partner_funding_in_project = eu_contribution
+                    total_partner_funding += partner_funding_in_project
                     break
             
             if not partner_in_project:
@@ -509,6 +550,10 @@ class ParticipantQuerySystem:
             project_info = self._get_project_info(project_id, partner_info.legal_name)
             if not project_info:
                 continue
+            
+            # Update the partner_funding if not already set
+            if project_info.partner_funding == 0.0 and partner_funding_in_project > 0:
+                project_info.partner_funding = partner_funding_in_project
             
             partner_projects.append(project_info)
             
@@ -522,6 +567,7 @@ class ParticipantQuerySystem:
             "total_projects": len(partner_projects),
             "slovenian_collaborations": len(slovenian_projects),
             "non_slovenian_projects": len(non_slovenian_projects),
+            "total_partner_funding": total_partner_funding,
             "all_projects": [p.to_dict() for p in partner_projects],
             "slovenian_projects": [p.to_dict() for p in slovenian_projects],
             "non_slovenian_projects_list": [p.to_dict() for p in non_slovenian_projects]
@@ -530,7 +576,7 @@ class ParticipantQuerySystem:
         return details
     
     def generate_collaboration_report(self, legal_name: str) -> str:
-        """Generate a formatted text report showing ALL projects (both with and without Slovenian partners)."""
+        """Generate a formatted text report showing ALL projects with funding amounts."""
         details = self.get_partner_details(legal_name)
         if not details:
             return f"No data found for partner: {legal_name}"
@@ -539,6 +585,7 @@ class ParticipantQuerySystem:
         all_projects = details["all_projects"]
         slovenian_projects = details["slovenian_projects"]
         non_slovenian_projects = details.get("non_slovenian_projects_list", [])
+        total_funding = details.get("total_partner_funding", 0.0)
         
         report_lines = []
         report_lines.append("=" * 80)
@@ -561,6 +608,7 @@ class ParticipantQuerySystem:
         report_lines.append(f"  Projects with Slovenian Partners: {details['slovenian_collaborations']}")
         report_lines.append(f"  Projects without Slovenian Partners: {len(non_slovenian_projects)}")
         report_lines.append(f"  Collaboration Ratio: {partner_info['Collaboration Ratio']}")
+        report_lines.append(f"  TOTAL EU FUNDING RECEIVED: €{total_funding:,.0f}")
         report_lines.append("")
         
         # ALL PROJECTS (complete list)
@@ -577,9 +625,10 @@ class ParticipantQuerySystem:
                     report_lines.append(f"\n  {i}. {project['Title']}")
                     report_lines.append(f"     Acronym: {project['Acronym']}")
                     report_lines.append(f"     Project ID: {project['Project ID']}")
+                    report_lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
+                    report_lines.append(f"     Total Project Budget: {project['Total Budget']}")
                     report_lines.append(f"     Website: {project['Website']}")
                     report_lines.append(f"     Duration: {project['Start Date']} to {project['End Date']}")
-                    report_lines.append(f"     Budget: {project['Total Budget']}")
                     report_lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
             
             if non_slovenian_projects:
@@ -590,9 +639,10 @@ class ParticipantQuerySystem:
                     report_lines.append(f"\n  {i}. {project['Title']}")
                     report_lines.append(f"     Acronym: {project['Acronym']}")
                     report_lines.append(f"     Project ID: {project['Project ID']}")
+                    report_lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
+                    report_lines.append(f"     Total Project Budget: {project['Total Budget']}")
                     report_lines.append(f"     Website: {project['Website']}")
                     report_lines.append(f"     Duration: {project['Start Date']} to {project['End Date']}")
-                    report_lines.append(f"     Budget: {project['Total Budget']}")
         else:
             report_lines.append("NO PROJECTS FOUND FOR THIS PARTNER")
         
@@ -720,7 +770,7 @@ def main():
     
     # Main content
     st.title("🔍 EU Project Partner Search System")
-    st.markdown("Search for research partners and view ALL their projects (both with and without Slovenian collaborations)")
+    st.markdown("Search for research partners and view ALL their projects with funding amounts")
     
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs(["🔎 Search Partners", "📄 Complete Reports", "📊 Statistics", "💾 Saved Outputs"])
@@ -795,7 +845,7 @@ def main():
             
             # Select partner for detailed view
             st.subheader("Select Partner for Complete Analysis")
-            st.info("View ALL projects for this partner (both with and without Slovenian partners)")
+            st.info("View ALL projects for this partner with funding amounts")
             partner_names = [p.legal_name for p in st.session_state.search_results[:100]]
             selected_name = st.selectbox("Choose a partner:", partner_names, key="partner_select")
             
@@ -808,6 +858,7 @@ def main():
                         if details:
                             st.session_state.selected_partner = details
                             st.success(f"Loaded {details['total_projects']} projects for {selected_name}")
+                            st.info(f"💰 Total EU Funding Received: €{details['total_partner_funding']:,.0f}")
                         else:
                             st.error("Could not load partner details")
             
@@ -844,14 +895,15 @@ def main():
                         key="download_report_btn_tab1"
                     )
             
-            # Display partner details with ALL projects
+            # Display partner details with ALL projects and funding
             if st.session_state.selected_partner:
                 with st.expander("📊 Complete Partner Details", expanded=True):
                     details = st.session_state.selected_partner
                     partner_info = details["partner_info"]
+                    total_funding = details.get("total_partner_funding", 0.0)
                     
                     # Summary metrics
-                    col1, col2, col3, col4, col5 = st.columns(5)
+                    col1, col2, col3, col4, col5, col6 = st.columns(6)
                     with col1:
                         st.metric("Country", partner_info["Country"])
                     with col2:
@@ -862,9 +914,12 @@ def main():
                         st.metric("Without Slovenian Partners", details["non_slovenian_projects"])
                     with col5:
                         st.metric("Collaboration Ratio", partner_info["Collaboration Ratio"])
+                    with col6:
+                        st.metric("Total EU Funding", f"€{total_funding:,.0f}")
                     
                     # ALL PROJECTS section
                     st.subheader(f"📋 ALL PROJECTS ({details['total_projects']} Total)")
+                    st.info(f"💰 Total EU Funding Received by this Partner: €{total_funding:,.0f}")
                     
                     # Projects with Slovenian partners
                     if details["slovenian_projects"]:
@@ -875,7 +930,8 @@ def main():
                                 "Title": project["Title"],
                                 "Acronym": project["Acronym"],
                                 "Project ID": project["Project ID"],
-                                "Budget": project["Total Budget"],
+                                "Partner Funding": project.get("Partner Funding", "N/A"),
+                                "Total Budget": project["Total Budget"],
                                 "Slovenian Partners": project["Slovenian Partners"][:50] + "..." if len(project["Slovenian Partners"]) > 50 else project["Slovenian Partners"]
                             })
                         st.dataframe(pd.DataFrame(projects_data_si), use_container_width=True)
@@ -889,7 +945,8 @@ def main():
                                 "Title": project["Title"],
                                 "Acronym": project["Acronym"],
                                 "Project ID": project["Project ID"],
-                                "Budget": project["Total Budget"],
+                                "Partner Funding": project.get("Partner Funding", "N/A"),
+                                "Total Budget": project["Total Budget"],
                                 "Has Slovenian Partners": "No"
                             })
                         st.dataframe(pd.DataFrame(projects_data_non_si), use_container_width=True)
@@ -899,7 +956,7 @@ def main():
     
     with tab2:
         st.subheader("📄 Generate Complete Partner Report")
-        st.markdown("Generate a report showing ALL projects for a partner (both with and without Slovenian collaborations)")
+        st.markdown("Generate a report showing ALL projects for a partner with funding amounts")
         
         col1, col2 = st.columns([2, 1])
         
@@ -1066,7 +1123,7 @@ def main():
     st.divider()
     st.markdown(f"""
     <div style="text-align: center; color: gray;">
-        <p>EU Project Partner Search System | Shows ALL projects (both with and without Slovenian collaborations)</p>
+        <p>EU Project Partner Search System | Shows ALL projects with funding amounts</p>
         <p>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     </div>
     """, unsafe_allow_html=True)
