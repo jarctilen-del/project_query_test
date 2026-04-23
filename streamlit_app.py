@@ -29,10 +29,13 @@ class ProjectInfo:
     total_budget: float
     has_slovenian_partners: bool
     slovenian_partners: List[str]
-    partner_funding: float = 0.0  # Funding received by the specific partner in this project
+    partner_funding: float = 0.0
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for display."""
+        # Determine if project has ended
+        is_ended = self._is_project_ended()
+        
         return {
             "Project ID": self.project_id,
             "Title": self.title,
@@ -40,11 +43,29 @@ class ProjectInfo:
             "Website": self.website,
             "Start Date": self.start_date,
             "End Date": self.end_date,
+            "Status": "🔴 Ended" if is_ended else "🟢 Ongoing",
             "Total Budget": f"€{self.total_budget:,.0f}",
             "Partner Funding": f"€{self.partner_funding:,.0f}",
             "Has Slovenian Partners": self.has_slovenian_partners,
             "Slovenian Partners": ", ".join(self.slovenian_partners) if self.slovenian_partners else "None"
         }
+    
+    def _is_project_ended(self) -> bool:
+        """Check if the project has ended based on end_date."""
+        try:
+            # Parse the end date (handle different formats)
+            if isinstance(self.end_date, str):
+                # Try to extract date part if it has time
+                end_date_str = self.end_date.split('T')[0] if 'T' in self.end_date else self.end_date
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+                return end_date < datetime.now()
+            return False
+        except:
+            return False
+    
+    def get_status_icon(self) -> str:
+        """Get status icon for the project."""
+        return "🔴" if self._is_project_ended() else "🟢"
 
 @dataclass
 class PartnerInfo:
@@ -180,23 +201,64 @@ class ReportSaver:
         lines.append(f"  TOTAL EU FUNDING RECEIVED: €{total_funding:,.0f}")
         lines.append("")
         
-        # Show ALL projects (both Slovenian and non-Slovenian)
+        # Separate projects by status
+        ended_projects = []
+        ongoing_projects = []
+        
+        for project in all_projects:
+            if self._is_project_ended_from_dict(project):
+                ended_projects.append(project)
+            else:
+                ongoing_projects.append(project)
+        
+        lines.append(f"PROJECT STATUS BREAKDOWN:")
+        lines.append("-" * 40)
+        lines.append(f"  🟢 Ongoing Projects: {len(ongoing_projects)}")
+        lines.append(f"  🔴 Ended Projects: {len(ended_projects)}")
+        lines.append("")
+        
+        # Show ALL projects with status
         if all_projects:
-            lines.append(f"ALL PROJECTS ({len(all_projects)}):")
+            lines.append(f"ALL PROJECTS ({len(all_projects)} TOTAL):")
             lines.append("-" * 80)
             
-            for i, project in enumerate(all_projects, 1):
-                si_status = "✓ WITH SLOVENIAN PARTNERS" if project['Has Slovenian Partners'] else "✗ NO SLOVENIAN PARTNERS"
-                lines.append(f"\n{i}. {project['Title']}")
-                lines.append(f"   Acronym: {project['Acronym']}")
-                lines.append(f"   Project ID: {project['Project ID']}")
-                lines.append(f"   Status: {si_status}")
-                lines.append(f"   Partner Funding: {project.get('Partner Funding', 'N/A')}")
-                lines.append(f"   Total Project Budget: {project['Total Budget']}")
-                lines.append(f"   Website: {project['Website']}")
-                lines.append(f"   Duration: {project['Start Date']} to {project['End Date']}")
-                if project['Has Slovenian Partners']:
-                    lines.append(f"   Slovenian Partners: {project['Slovenian Partners']}")
+            # Show ongoing projects first
+            if ongoing_projects:
+                lines.append(f"\n🟢 ONGOING PROJECTS ({len(ongoing_projects)}):")
+                lines.append("-" * 60)
+                
+                for i, project in enumerate(ongoing_projects, 1):
+                    si_status = "✓ WITH SLOVENIAN PARTNERS" if project['Has Slovenian Partners'] else "✗ NO SLOVENIAN PARTNERS"
+                    lines.append(f"\n  {i}. {project['Title']}")
+                    lines.append(f"     Acronym: {project['Acronym']}")
+                    lines.append(f"     Project ID: {project['Project ID']}")
+                    lines.append(f"     Status: 🟢 Ongoing")
+                    lines.append(f"     End Date: {project['End Date']}")
+                    lines.append(f"     Status: {si_status}")
+                    lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
+                    lines.append(f"     Total Project Budget: {project['Total Budget']}")
+                    lines.append(f"     Website: {project['Website']}")
+                    if project['Has Slovenian Partners']:
+                        lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
+            
+            # Show ended projects
+            if ended_projects:
+                lines.append(f"\n🔴 ENDED PROJECTS ({len(ended_projects)}):")
+                lines.append("-" * 60)
+                
+                for i, project in enumerate(ended_projects, 1):
+                    si_status = "✓ WITH SLOVENIAN PARTNERS" if project['Has Slovenian Partners'] else "✗ NO SLOVENIAN PARTNERS"
+                    lines.append(f"\n  {i}. {project['Title']}")
+                    lines.append(f"     Acronym: {project['Acronym']}")
+                    lines.append(f"     Project ID: {project['Project ID']}")
+                    lines.append(f"     Status: 🔴 Ended")
+                    lines.append(f"     End Date: {project['End Date']}")
+                    lines.append(f"     Status: {si_status}")
+                    lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
+                    lines.append(f"     Total Project Budget: {project['Total Budget']}")
+                    lines.append(f"     Website: {project['Website']}")
+                    if project['Has Slovenian Partners']:
+                        lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
         else:
             lines.append("NO PROJECTS FOUND FOR THIS PARTNER")
         
@@ -205,6 +267,19 @@ class ReportSaver:
         
         content = "\n".join(lines)
         return self.save_report(content, filename, "collaboration_details")
+    
+    def _is_project_ended_from_dict(self, project: Dict) -> bool:
+        """Check if a project has ended based on end_date in dict."""
+        try:
+            end_date_str = project.get('End Date', '')
+            if end_date_str:
+                # Extract date part
+                end_date_str = end_date_str.split('T')[0] if 'T' in end_date_str else end_date_str
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+                return end_date < datetime.now()
+            return False
+        except:
+            return False
 
 # ---------------------------------------------------------------
 # PARTICIPANT QUERY SYSTEM
@@ -562,21 +637,34 @@ class ParticipantQuerySystem:
             else:
                 non_slovenian_projects.append(project_info)
         
+        # Separate by status
+        ongoing_projects = []
+        ended_projects = []
+        for project in partner_projects:
+            if project._is_project_ended():
+                ended_projects.append(project)
+            else:
+                ongoing_projects.append(project)
+        
         details = {
             "partner_info": partner_info.to_dict(),
             "total_projects": len(partner_projects),
             "slovenian_collaborations": len(slovenian_projects),
             "non_slovenian_projects": len(non_slovenian_projects),
             "total_partner_funding": total_partner_funding,
+            "ongoing_projects": len(ongoing_projects),
+            "ended_projects": len(ended_projects),
             "all_projects": [p.to_dict() for p in partner_projects],
             "slovenian_projects": [p.to_dict() for p in slovenian_projects],
-            "non_slovenian_projects_list": [p.to_dict() for p in non_slovenian_projects]
+            "non_slovenian_projects_list": [p.to_dict() for p in non_slovenian_projects],
+            "ongoing_projects_list": [p.to_dict() for p in ongoing_projects],
+            "ended_projects_list": [p.to_dict() for p in ended_projects]
         }
         
         return details
     
     def generate_collaboration_report(self, legal_name: str) -> str:
-        """Generate a formatted text report showing ALL projects with funding amounts."""
+        """Generate a formatted text report showing ALL projects with funding amounts and status."""
         details = self.get_partner_details(legal_name)
         if not details:
             return f"No data found for partner: {legal_name}"
@@ -586,6 +674,8 @@ class ParticipantQuerySystem:
         slovenian_projects = details["slovenian_projects"]
         non_slovenian_projects = details.get("non_slovenian_projects_list", [])
         total_funding = details.get("total_partner_funding", 0.0)
+        ongoing_count = details.get("ongoing_projects", 0)
+        ended_count = details.get("ended_projects", 0)
         
         report_lines = []
         report_lines.append("=" * 80)
@@ -611,38 +701,59 @@ class ParticipantQuerySystem:
         report_lines.append(f"  TOTAL EU FUNDING RECEIVED: €{total_funding:,.0f}")
         report_lines.append("")
         
+        # Project status breakdown
+        report_lines.append("PROJECT STATUS BREAKDOWN:")
+        report_lines.append("-" * 40)
+        report_lines.append(f"  🟢 Ongoing Projects: {ongoing_count}")
+        report_lines.append(f"  🔴 Ended Projects: {ended_count}")
+        report_lines.append("")
+        
         # ALL PROJECTS (complete list)
         if all_projects:
             report_lines.append(f"ALL PROJECTS ({len(all_projects)} TOTAL):")
             report_lines.append("=" * 80)
             
-            # Separate into two sections for clarity
-            if slovenian_projects:
-                report_lines.append(f"\n✓ PROJECTS WITH SLOVENIAN PARTNERS ({len(slovenian_projects)}):")
-                report_lines.append("-" * 60)
-                
-                for i, project in enumerate(slovenian_projects, 1):
-                    report_lines.append(f"\n  {i}. {project['Title']}")
-                    report_lines.append(f"     Acronym: {project['Acronym']}")
-                    report_lines.append(f"     Project ID: {project['Project ID']}")
-                    report_lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
-                    report_lines.append(f"     Total Project Budget: {project['Total Budget']}")
-                    report_lines.append(f"     Website: {project['Website']}")
-                    report_lines.append(f"     Duration: {project['Start Date']} to {project['End Date']}")
-                    report_lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
+            # Separate ongoing and ended projects
+            ongoing_projects = details.get("ongoing_projects_list", [])
+            ended_projects = details.get("ended_projects_list", [])
             
-            if non_slovenian_projects:
-                report_lines.append(f"\n✗ PROJECTS WITHOUT SLOVENIAN PARTNERS ({len(non_slovenian_projects)}):")
+            # Show ongoing projects first
+            if ongoing_projects:
+                report_lines.append(f"\n🟢 ONGOING PROJECTS ({len(ongoing_projects)}):")
                 report_lines.append("-" * 60)
                 
-                for i, project in enumerate(non_slovenian_projects, 1):
+                for i, project in enumerate(ongoing_projects, 1):
+                    si_status = "✓ WITH SLOVENIAN PARTNERS" if project['Has Slovenian Partners'] else "✗ NO SLOVENIAN PARTNERS"
                     report_lines.append(f"\n  {i}. {project['Title']}")
                     report_lines.append(f"     Acronym: {project['Acronym']}")
                     report_lines.append(f"     Project ID: {project['Project ID']}")
+                    report_lines.append(f"     Status: 🟢 Ongoing")
+                    report_lines.append(f"     End Date: {project['End Date']}")
+                    report_lines.append(f"     Slovenian Status: {si_status}")
                     report_lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
                     report_lines.append(f"     Total Project Budget: {project['Total Budget']}")
                     report_lines.append(f"     Website: {project['Website']}")
-                    report_lines.append(f"     Duration: {project['Start Date']} to {project['End Date']}")
+                    if project['Has Slovenian Partners']:
+                        report_lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
+            
+            # Show ended projects
+            if ended_projects:
+                report_lines.append(f"\n🔴 ENDED PROJECTS ({len(ended_projects)}):")
+                report_lines.append("-" * 60)
+                
+                for i, project in enumerate(ended_projects, 1):
+                    si_status = "✓ WITH SLOVENIAN PARTNERS" if project['Has Slovenian Partners'] else "✗ NO SLOVENIAN PARTNERS"
+                    report_lines.append(f"\n  {i}. {project['Title']}")
+                    report_lines.append(f"     Acronym: {project['Acronym']}")
+                    report_lines.append(f"     Project ID: {project['Project ID']}")
+                    report_lines.append(f"     Status: 🔴 Ended")
+                    report_lines.append(f"     End Date: {project['End Date']}")
+                    report_lines.append(f"     Slovenian Status: {si_status}")
+                    report_lines.append(f"     Partner Funding: {project.get('Partner Funding', 'N/A')}")
+                    report_lines.append(f"     Total Project Budget: {project['Total Budget']}")
+                    report_lines.append(f"     Website: {project['Website']}")
+                    if project['Has Slovenian Partners']:
+                        report_lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
         else:
             report_lines.append("NO PROJECTS FOUND FOR THIS PARTNER")
         
@@ -711,6 +822,22 @@ def main():
             margin: 10px 0;
             border-left: 4px solid #17a2b8;
         }
+        .ongoing-badge {
+            background-color: #28a745;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .ended-badge {
+            background-color: #dc3545;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
     </style>
     """, unsafe_allow_html=True)
     
@@ -770,7 +897,7 @@ def main():
     
     # Main content
     st.title("🔍 EU Project Partner Search System")
-    st.markdown("Search for research partners and view ALL their projects with funding amounts")
+    st.markdown("Search for research partners and view ALL their projects with funding amounts and status")
     
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs(["🔎 Search Partners", "📄 Complete Reports", "📊 Statistics", "💾 Saved Outputs"])
@@ -845,7 +972,7 @@ def main():
             
             # Select partner for detailed view
             st.subheader("Select Partner for Complete Analysis")
-            st.info("View ALL projects for this partner with funding amounts")
+            st.info("View ALL projects for this partner with funding amounts and status")
             partner_names = [p.legal_name for p in st.session_state.search_results[:100]]
             selected_name = st.selectbox("Choose a partner:", partner_names, key="partner_select")
             
@@ -901,9 +1028,11 @@ def main():
                     details = st.session_state.selected_partner
                     partner_info = details["partner_info"]
                     total_funding = details.get("total_partner_funding", 0.0)
+                    ongoing_count = details.get("ongoing_projects", 0)
+                    ended_count = details.get("ended_projects", 0)
                     
                     # Summary metrics
-                    col1, col2, col3, col4, col5, col6 = st.columns(6)
+                    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
                     with col1:
                         st.metric("Country", partner_info["Country"])
                     with col2:
@@ -916,47 +1045,66 @@ def main():
                         st.metric("Collaboration Ratio", partner_info["Collaboration Ratio"])
                     with col6:
                         st.metric("Total EU Funding", f"€{total_funding:,.0f}")
+                    with col7:
+                        st.metric("🟢 Ongoing / 🔴 Ended", f"{ongoing_count} / {ended_count}")
                     
                     # ALL PROJECTS section
                     st.subheader(f"📋 ALL PROJECTS ({details['total_projects']} Total)")
-                    st.info(f"💰 Total EU Funding Received by this Partner: €{total_funding:,.0f}")
                     
-                    # Projects with Slovenian partners
-                    if details["slovenian_projects"]:
-                        st.markdown("### ✅ Projects WITH Slovenian Partners")
-                        projects_data_si = []
-                        for project in details["slovenian_projects"]:
-                            projects_data_si.append({
+                    # Show ongoing projects
+                    if details.get("ongoing_projects_list"):
+                        st.markdown(f"### 🟢 Ongoing Projects ({len(details['ongoing_projects_list'])})")
+                        st.info("These projects are still active or have not ended yet")
+                        ongoing_data = []
+                        for project in details["ongoing_projects_list"]:
+                            ongoing_data.append({
                                 "Title": project["Title"],
                                 "Acronym": project["Acronym"],
                                 "Project ID": project["Project ID"],
+                                "Status": "🟢 Ongoing",
+                                "End Date": project["End Date"],
                                 "Partner Funding": project.get("Partner Funding", "N/A"),
                                 "Total Budget": project["Total Budget"],
-                                "Slovenian Partners": project["Slovenian Partners"][:50] + "..." if len(project["Slovenian Partners"]) > 50 else project["Slovenian Partners"]
+                                "Has Slovenian Partners": "Yes" if project["Has Slovenian Partners"] else "No"
                             })
-                        st.dataframe(pd.DataFrame(projects_data_si), use_container_width=True)
+                        st.dataframe(pd.DataFrame(ongoing_data), use_container_width=True)
                     
-                    # Projects without Slovenian partners
-                    if details.get("non_slovenian_projects_list"):
-                        st.markdown("### ❌ Projects WITHOUT Slovenian Partners")
-                        projects_data_non_si = []
-                        for project in details["non_slovenian_projects_list"]:
-                            projects_data_non_si.append({
+                    # Show ended projects
+                    if details.get("ended_projects_list"):
+                        st.markdown(f"### 🔴 Ended Projects ({len(details['ended_projects_list'])})")
+                        st.warning("These projects have already ended")
+                        ended_data = []
+                        for project in details["ended_projects_list"]:
+                            ended_data.append({
                                 "Title": project["Title"],
                                 "Acronym": project["Acronym"],
                                 "Project ID": project["Project ID"],
+                                "Status": "🔴 Ended",
+                                "End Date": project["End Date"],
                                 "Partner Funding": project.get("Partner Funding", "N/A"),
                                 "Total Budget": project["Total Budget"],
-                                "Has Slovenian Partners": "No"
+                                "Has Slovenian Partners": "Yes" if project["Has Slovenian Partners"] else "No"
                             })
-                        st.dataframe(pd.DataFrame(projects_data_non_si), use_container_width=True)
+                        st.dataframe(pd.DataFrame(ended_data), use_container_width=True)
                     
-                    if not details["slovenian_projects"] and not details.get("non_slovenian_projects_list"):
+                    # Also show Slovenian collaboration breakdown by status
+                    st.markdown("### 📊 Slovenian Collaboration Breakdown by Project Status")
+                    
+                    si_ongoing = [p for p in details.get("ongoing_projects_list", []) if p["Has Slovenian Partners"]]
+                    si_ended = [p for p in details.get("ended_projects_list", []) if p["Has Slovenian Partners"]]
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("🟢 Ongoing Projects with SI", len(si_ongoing))
+                    with col2:
+                        st.metric("🔴 Ended Projects with SI", len(si_ended))
+                    
+                    if not details.get("ongoing_projects_list") and not details.get("ended_projects_list"):
                         st.info("No projects found for this partner")
     
     with tab2:
         st.subheader("📄 Generate Complete Partner Report")
-        st.markdown("Generate a report showing ALL projects for a partner with funding amounts")
+        st.markdown("Generate a report showing ALL projects for a partner with funding amounts and status")
         
         col1, col2 = st.columns([2, 1])
         
@@ -1022,19 +1170,41 @@ def main():
                 has_si, si_partners = st.session_state.query_system._project_has_slovenian_partners(row['project_ID'])
                 if has_si:
                     si_count += 1
+                    
+                    # Check if project is ended
+                    end_date = row['end_date']
+                    is_ended = False
+                    try:
+                        if isinstance(end_date, str):
+                            end_date_str = end_date.split('T')[0] if 'T' in end_date else end_date
+                            end_date_obj = datetime.strptime(end_date_str, '%Y-%m-%d')
+                            is_ended = end_date_obj < datetime.now()
+                    except:
+                        pass
+                    
+                    status = "🔴 Ended" if is_ended else "🟢 Ongoing"
+                    
                     si_projects_list.append({
                         "Title": row['title'],
                         "Project ID": row['project_ID'],
+                        "Status": status,
+                        "End Date": end_date,
                         "Slovenian Partners": ", ".join(si_partners)
                     })
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Projects with Slovenian Partners", f"{si_count:,}")
                 st.metric("Percentage", f"{(si_count/total_projects)*100:.1f}%")
             
             with col2:
                 st.metric("Projects without Slovenian Partners", f"{total_projects - si_count:,}")
+            
+            with col3:
+                # Count ongoing vs ended SI projects
+                ongoing_si = len([p for p in si_projects_list if "🟢" in p["Status"]])
+                ended_si = len([p for p in si_projects_list if "🔴" in p["Status"]])
+                st.metric("🟢 Ongoing / 🔴 Ended SI Projects", f"{ongoing_si} / {ended_si}")
             
             # Display SI projects
             if si_projects_list:
@@ -1058,6 +1228,8 @@ def main():
                 stats_report.append(f"Total Projects: {total_projects_local}")
                 stats_report.append(f"Projects with Slovenian Partners: {si_count}")
                 stats_report.append(f"Percentage: {(si_count/total_projects_local)*100:.1f}%")
+                stats_report.append(f"Ongoing SI Projects: {ongoing_si}")
+                stats_report.append(f"Ended SI Projects: {ended_si}")
             
             stats_text = "\n".join(stats_report)
             
@@ -1123,7 +1295,7 @@ def main():
     st.divider()
     st.markdown(f"""
     <div style="text-align: center; color: gray;">
-        <p>EU Project Partner Search System | Shows ALL projects with funding amounts</p>
+        <p>EU Project Partner Search System | Shows ALL projects with funding amounts and status (🟢 Ongoing / 🔴 Ended)</p>
         <p>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     </div>
     """, unsafe_allow_html=True)
