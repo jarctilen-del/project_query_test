@@ -151,11 +151,13 @@ class ReportSaver:
         filename = f"{safe_name}_collaboration_details_{timestamp}.txt"
         
         partner_info = details["partner_info"]
-        collaborations = details["slovenian_projects"]
+        all_projects = details["all_projects"]
+        slovenian_projects = details["slovenian_projects"]
+        non_slovenian_projects = details.get("non_slovenian_projects", [])
         
         lines = []
         lines.append("=" * 80)
-        lines.append(f"COLLABORATION DETAILS: {partner_info['Legal Name']}")
+        lines.append(f"PARTNER DETAILS: {partner_info['Legal Name']}")
         lines.append("=" * 80)
         lines.append(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append("")
@@ -170,23 +172,28 @@ class ReportSaver:
         lines.append("-" * 40)
         lines.append(f"  Total Projects: {details['total_projects']}")
         lines.append(f"  Slovenian Collaborations: {details['slovenian_collaborations']}")
+        lines.append(f"  Non-Slovenian Projects: {len(non_slovenian_projects)}")
         lines.append(f"  Collaboration Ratio: {partner_info['Collaboration Ratio']}")
         lines.append("")
         
-        if collaborations:
-            lines.append(f"PROJECTS WITH SLOVENIAN PARTNERS ({len(collaborations)}):")
+        # Show ALL projects (both Slovenian and non-Slovenian)
+        if all_projects:
+            lines.append(f"ALL PROJECTS ({len(all_projects)}):")
             lines.append("-" * 80)
             
-            for i, project in enumerate(collaborations, 1):
+            for i, project in enumerate(all_projects, 1):
+                si_status = "✓ WITH SLOVENIAN PARTNERS" if project['Has Slovenian Partners'] else "✗ NO SLOVENIAN PARTNERS"
                 lines.append(f"\n{i}. {project['Title']}")
                 lines.append(f"   Acronym: {project['Acronym']}")
                 lines.append(f"   Project ID: {project['Project ID']}")
+                lines.append(f"   Status: {si_status}")
                 lines.append(f"   Website: {project['Website']}")
                 lines.append(f"   Duration: {project['Start Date']} to {project['End Date']}")
                 lines.append(f"   Budget: {project['Total Budget']}")
-                lines.append(f"   Slovenian Partners: {project['Slovenian Partners']}")
+                if project['Has Slovenian Partners']:
+                    lines.append(f"   Slovenian Partners: {project['Slovenian Partners']}")
         else:
-            lines.append("NO PROJECTS WITH SLOVENIAN PARTNERS FOUND")
+            lines.append("NO PROJECTS FOUND FOR THIS PARTNER")
         
         lines.append("")
         lines.append("=" * 80)
@@ -463,7 +470,7 @@ class ParticipantQuerySystem:
         return matched_partners
     
     def get_partner_details(self, legal_name: str) -> Optional[Dict]:
-        """Get detailed information about a specific partner."""
+        """Get detailed information about a specific partner including ALL projects."""
         if self.all_projects_df is None:
             st.error("No data available.")
             return None
@@ -483,6 +490,7 @@ class ParticipantQuerySystem:
         
         partner_projects = []
         slovenian_projects = []
+        non_slovenian_projects = []
         
         for idx, row in self.all_projects_df.iterrows():
             if not isinstance(row['participants'], list):
@@ -506,63 +514,90 @@ class ParticipantQuerySystem:
             
             if project_info.has_slovenian_partners:
                 slovenian_projects.append(project_info)
+            else:
+                non_slovenian_projects.append(project_info)
         
         details = {
             "partner_info": partner_info.to_dict(),
             "total_projects": len(partner_projects),
             "slovenian_collaborations": len(slovenian_projects),
+            "non_slovenian_projects": len(non_slovenian_projects),
             "all_projects": [p.to_dict() for p in partner_projects],
-            "slovenian_projects": [p.to_dict() for p in slovenian_projects]
+            "slovenian_projects": [p.to_dict() for p in slovenian_projects],
+            "non_slovenian_projects_list": [p.to_dict() for p in non_slovenian_projects]
         }
         
         return details
     
     def generate_collaboration_report(self, legal_name: str) -> str:
-        """Generate a formatted text report of Slovenian collaborations."""
+        """Generate a formatted text report showing ALL projects (both with and without Slovenian partners)."""
         details = self.get_partner_details(legal_name)
         if not details:
             return f"No data found for partner: {legal_name}"
         
         partner_info = details["partner_info"]
-        collaborations = details["slovenian_projects"]
+        all_projects = details["all_projects"]
+        slovenian_projects = details["slovenian_projects"]
+        non_slovenian_projects = details.get("non_slovenian_projects_list", [])
         
         report_lines = []
         report_lines.append("=" * 80)
-        report_lines.append(f"COLLABORATION REPORT: {partner_info['Legal Name']}")
+        report_lines.append(f"COMPLETE PARTNER REPORT: {partner_info['Legal Name']}")
         report_lines.append("=" * 80)
+        report_lines.append(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         report_lines.append("")
         
+        # Partner information
         report_lines.append("PARTNER INFORMATION:")
         report_lines.append("-" * 40)
         for key, value in partner_info.items():
             report_lines.append(f"  {key}: {value}")
         report_lines.append("")
         
-        report_lines.append("COLLABORATION WITH SLOVENIAN PARTNERS:")
+        # Collaboration summary
+        report_lines.append("COLLABORATION SUMMARY:")
         report_lines.append("-" * 40)
         report_lines.append(f"  Total Projects: {details['total_projects']}")
-        report_lines.append(f"  Slovenian Collaborations: {details['slovenian_collaborations']}")
+        report_lines.append(f"  Projects with Slovenian Partners: {details['slovenian_collaborations']}")
+        report_lines.append(f"  Projects without Slovenian Partners: {len(non_slovenian_projects)}")
         report_lines.append(f"  Collaboration Ratio: {partner_info['Collaboration Ratio']}")
         report_lines.append("")
         
-        if collaborations:
-            report_lines.append(f"PROJECTS WITH SLOVENIAN PARTNERS ({len(collaborations)}):")
-            report_lines.append("-" * 40)
+        # ALL PROJECTS (complete list)
+        if all_projects:
+            report_lines.append(f"ALL PROJECTS ({len(all_projects)} TOTAL):")
+            report_lines.append("=" * 80)
             
-            for i, project in enumerate(collaborations, 1):
-                report_lines.append(f"\n{i}. {project['Title']}")
-                report_lines.append(f"   Acronym: {project['Acronym']}")
-                report_lines.append(f"   Project ID: {project['Project ID']}")
-                report_lines.append(f"   Website: {project['Website']}")
-                report_lines.append(f"   Duration: {project['Start Date']} to {project['End Date']}")
-                report_lines.append(f"   Budget: {project['Total Budget']}")
-                report_lines.append(f"   Slovenian Partners in Project: {project['Slovenian Partners']}")
+            # Separate into two sections for clarity
+            if slovenian_projects:
+                report_lines.append(f"\n✓ PROJECTS WITH SLOVENIAN PARTNERS ({len(slovenian_projects)}):")
+                report_lines.append("-" * 60)
+                
+                for i, project in enumerate(slovenian_projects, 1):
+                    report_lines.append(f"\n  {i}. {project['Title']}")
+                    report_lines.append(f"     Acronym: {project['Acronym']}")
+                    report_lines.append(f"     Project ID: {project['Project ID']}")
+                    report_lines.append(f"     Website: {project['Website']}")
+                    report_lines.append(f"     Duration: {project['Start Date']} to {project['End Date']}")
+                    report_lines.append(f"     Budget: {project['Total Budget']}")
+                    report_lines.append(f"     Slovenian Partners: {project['Slovenian Partners']}")
+            
+            if non_slovenian_projects:
+                report_lines.append(f"\n✗ PROJECTS WITHOUT SLOVENIAN PARTNERS ({len(non_slovenian_projects)}):")
+                report_lines.append("-" * 60)
+                
+                for i, project in enumerate(non_slovenian_projects, 1):
+                    report_lines.append(f"\n  {i}. {project['Title']}")
+                    report_lines.append(f"     Acronym: {project['Acronym']}")
+                    report_lines.append(f"     Project ID: {project['Project ID']}")
+                    report_lines.append(f"     Website: {project['Website']}")
+                    report_lines.append(f"     Duration: {project['Start Date']} to {project['End Date']}")
+                    report_lines.append(f"     Budget: {project['Total Budget']}")
         else:
-            report_lines.append("NO PROJECTS WITH SLOVENIAN PARTNERS FOUND")
+            report_lines.append("NO PROJECTS FOUND FOR THIS PARTNER")
         
         report_lines.append("")
         report_lines.append("=" * 80)
-        report_lines.append(f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         return "\n".join(report_lines)
     
@@ -577,7 +612,7 @@ class ParticipantQuerySystem:
             os.makedirs(self.results_folder, exist_ok=True)
             safe_name = "".join(c for c in legal_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{safe_name}_collaboration_report_{timestamp}.txt"
+            filename = f"{safe_name}_complete_report_{timestamp}.txt"
             output_file = os.path.join(self.results_folder, filename)
         else:
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -611,6 +646,20 @@ def main():
         }
         .stButton > button:hover {
             background-color: #45a049;
+        }
+        .success-box {
+            background-color: #d4edda;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #28a745;
+        }
+        .info-box {
+            background-color: #d1ecf1;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #17a2b8;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -655,7 +704,8 @@ def main():
         # Statistics
         st.markdown("## 📊 Database Statistics")
         if st.session_state.query_system.all_projects_df is not None:
-            st.metric("Total Projects", len(st.session_state.query_system.all_projects_df))
+            total_projects = len(st.session_state.query_system.all_projects_df)
+            st.metric("Total Projects", total_projects)
             
             # Count SI projects
             si_count = 0
@@ -664,15 +714,16 @@ def main():
                 if has_si:
                     si_count += 1
             st.metric("Projects with Slovenian Partners", si_count)
+            st.metric("Percentage with SI", f"{(si_count/total_projects)*100:.1f}%" if total_projects > 0 else "0%")
         else:
             st.warning("No data loaded yet")
     
     # Main content
     st.title("🔍 EU Project Partner Search System")
-    st.markdown("Search for research partners and their collaborations with Slovenian organizations")
+    st.markdown("Search for research partners and view ALL their projects (both with and without Slovenian collaborations)")
     
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["🔎 Search Partners", "📄 Collaboration Reports", "📊 Statistics", "💾 Saved Outputs"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🔎 Search Partners", "📄 Complete Reports", "📊 Statistics", "💾 Saved Outputs"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -743,31 +794,32 @@ def main():
                 st.success(f"Search results saved to: {filepath}")
             
             # Select partner for detailed view
-            st.subheader("Select Partner for Detailed Analysis")
+            st.subheader("Select Partner for Complete Analysis")
+            st.info("View ALL projects for this partner (both with and without Slovenian partners)")
             partner_names = [p.legal_name for p in st.session_state.search_results[:100]]
             selected_name = st.selectbox("Choose a partner:", partner_names, key="partner_select")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("📄 View Details", key="view_details_btn"):
-                    with st.spinner("Loading details..."):
+                if st.button("📄 View Complete Details", key="view_details_btn"):
+                    with st.spinner("Loading all projects for this partner..."):
                         details = st.session_state.query_system.get_partner_details(selected_name)
                         if details:
                             st.session_state.selected_partner = details
-                            st.success(f"Loaded details for {selected_name}")
+                            st.success(f"Loaded {details['total_projects']} projects for {selected_name}")
                         else:
                             st.error("Could not load partner details")
             
             with col2:
-                if st.button("📝 Generate Report", key="generate_report_btn_tab1"):
-                    with st.spinner("Generating report..."):
+                if st.button("📝 Generate Complete Report", key="generate_report_btn_tab1"):
+                    with st.spinner("Generating complete report..."):
                         report = st.session_state.query_system.generate_collaboration_report(selected_name)
                         st.session_state.generated_report = report
-                        st.success("Report generated!")
+                        st.success("Complete report generated!")
             
             with col3:
-                if st.button("💾 Save to File", key="save_report_btn_tab1"):
+                if st.button("💾 Save Report to File", key="save_report_btn_tab1"):
                     with st.spinner("Saving..."):
                         filepath = st.session_state.query_system.export_collaboration_report_to_txt(selected_name)
                         if filepath:
@@ -780,51 +832,74 @@ def main():
             
             # Display generated report
             if st.session_state.generated_report:
-                with st.expander("📄 Generated Report", expanded=True):
-                    st.text_area("Report Content", st.session_state.generated_report, height=400, key="report_content_tab1")
+                with st.expander("📄 Complete Report", expanded=True):
+                    st.text_area("Report Content", st.session_state.generated_report, height=500, key="report_content_tab1")
                     
                     # Download button
                     st.download_button(
-                        label="📥 Download Report as TXT",
+                        label="📥 Download Complete Report as TXT",
                         data=st.session_state.generated_report,
-                        file_name=f"{selected_name}_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        file_name=f"{selected_name}_complete_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                         mime="text/plain",
                         key="download_report_btn_tab1"
                     )
             
-            # Display partner details
+            # Display partner details with ALL projects
             if st.session_state.selected_partner:
-                with st.expander("📊 Partner Details", expanded=True):
+                with st.expander("📊 Complete Partner Details", expanded=True):
                     details = st.session_state.selected_partner
                     partner_info = details["partner_info"]
                     
-                    col1, col2, col3, col4 = st.columns(4)
+                    # Summary metrics
+                    col1, col2, col3, col4, col5 = st.columns(5)
                     with col1:
                         st.metric("Country", partner_info["Country"])
                     with col2:
                         st.metric("Total Projects", partner_info["Total Projects"])
                     with col3:
-                        st.metric("SI Collaborations", partner_info["Slovenian Projects"])
+                        st.metric("With Slovenian Partners", partner_info["Slovenian Projects"])
                     with col4:
+                        st.metric("Without Slovenian Partners", details["non_slovenian_projects"])
+                    with col5:
                         st.metric("Collaboration Ratio", partner_info["Collaboration Ratio"])
                     
-                    st.subheader("Projects with Slovenian Partners")
+                    # ALL PROJECTS section
+                    st.subheader(f"📋 ALL PROJECTS ({details['total_projects']} Total)")
+                    
+                    # Projects with Slovenian partners
                     if details["slovenian_projects"]:
-                        projects_data = []
+                        st.markdown("### ✅ Projects WITH Slovenian Partners")
+                        projects_data_si = []
                         for project in details["slovenian_projects"]:
-                            projects_data.append({
+                            projects_data_si.append({
                                 "Title": project["Title"],
                                 "Acronym": project["Acronym"],
                                 "Project ID": project["Project ID"],
                                 "Budget": project["Total Budget"],
                                 "Slovenian Partners": project["Slovenian Partners"][:50] + "..." if len(project["Slovenian Partners"]) > 50 else project["Slovenian Partners"]
                             })
-                        st.dataframe(pd.DataFrame(projects_data), use_container_width=True)
-                    else:
-                        st.info("No Slovenian collaborations found")
+                        st.dataframe(pd.DataFrame(projects_data_si), use_container_width=True)
+                    
+                    # Projects without Slovenian partners
+                    if details.get("non_slovenian_projects_list"):
+                        st.markdown("### ❌ Projects WITHOUT Slovenian Partners")
+                        projects_data_non_si = []
+                        for project in details["non_slovenian_projects_list"]:
+                            projects_data_non_si.append({
+                                "Title": project["Title"],
+                                "Acronym": project["Acronym"],
+                                "Project ID": project["Project ID"],
+                                "Budget": project["Total Budget"],
+                                "Has Slovenian Partners": "No"
+                            })
+                        st.dataframe(pd.DataFrame(projects_data_non_si), use_container_width=True)
+                    
+                    if not details["slovenian_projects"] and not details.get("non_slovenian_projects_list"):
+                        st.info("No projects found for this partner")
     
     with tab2:
-        st.subheader("📄 Generate Collaboration Report")
+        st.subheader("📄 Generate Complete Partner Report")
+        st.markdown("Generate a report showing ALL projects for a partner (both with and without Slovenian collaborations)")
         
         col1, col2 = st.columns([2, 1])
         
@@ -834,19 +909,19 @@ def main():
         with col2:
             st.write("")
             st.write("")
-            generate_btn = st.button("🚀 Generate Report", key="generate_report_btn_tab2")
+            generate_btn = st.button("🚀 Generate Complete Report", key="generate_report_btn_tab2")
         
         if generate_btn and partner_name:
-            with st.spinner("Generating report..."):
+            with st.spinner("Generating complete report..."):
                 report = st.session_state.query_system.generate_collaboration_report(partner_name)
                 
                 if "No data found" in report:
                     st.error(report)
                 else:
-                    st.success("Report generated successfully!")
+                    st.success("Complete report generated successfully!")
                     
                     # Display report
-                    st.text_area("Collaboration Report", report, height=500, key="report_content_tab2")
+                    st.text_area("Complete Report", report, height=600, key="report_content_tab2")
                     
                     # Save options
                     col1, col2, col3 = st.columns(3)
@@ -859,9 +934,9 @@ def main():
                     
                     with col2:
                         st.download_button(
-                            label="📥 Download",
+                            label="📥 Download Complete Report",
                             data=report,
-                            file_name=f"{partner_name}_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            file_name=f"{partner_name}_complete_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                             mime="text/plain",
                             key="download_report_btn_tab2"
                         )
@@ -991,7 +1066,7 @@ def main():
     st.divider()
     st.markdown(f"""
     <div style="text-align: center; color: gray;">
-        <p>EU Project Partner Search System | Data source: European Commission</p>
+        <p>EU Project Partner Search System | Shows ALL projects (both with and without Slovenian collaborations)</p>
         <p>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     </div>
     """, unsafe_allow_html=True)
